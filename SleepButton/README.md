@@ -27,4 +27,4 @@ A 15x5 NeoPixel matrix display driven by an ESP32, with a push button for input.
 
 ## Serial
 
-115200 baud. `platformio.ini` sets `targets = upload, monitor`, so uploading opens the serial monitor automatically.
+115200 baud.
