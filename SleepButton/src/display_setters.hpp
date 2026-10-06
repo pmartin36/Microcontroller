@@ -5,7 +5,7 @@
 #include "utils.hpp"
 #include "char_setters.hpp"
 
-void setDisplayAsClockTime(Adafruit_NeoPixel strip, uint32_t color) {
+void setDisplayAsClockTime(Adafruit_NeoPixel& strip, uint32_t color) {
   strip.clear();
 
   uint8_t h, m;

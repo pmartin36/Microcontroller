@@ -5,7 +5,7 @@ ESP32 projects built with [PlatformIO](https://platformio.org/) and the Arduino 
 | Project | Description |
 |---|---|
 | [HelloWorld](HelloWorld/) | Button input with debouncing, driving the onboard LED and a NeoPixel strip |
-| [SleepButton](SleepButton/SleepButton/) | 15x5 NeoPixel matrix display with a 3x5 digit font |
+| [SleepButton](SleepButton/) | 15x5 NeoPixel matrix display with a 3x5 digit font |
 
 ## Hardware
 

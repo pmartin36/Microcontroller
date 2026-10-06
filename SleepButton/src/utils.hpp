@@ -9,7 +9,7 @@ void getTime(uint8_t* h, uint8_t* m) {
 
 }
 
-void setPixelXY(Adafruit_NeoPixel strip, uint8_t x, uint8_t y, uint32_t color) {
+void setPixelXY(Adafruit_NeoPixel& strip, uint8_t x, uint8_t y, uint32_t color) {
   if(x >= LIGHTS_PER_ROW || x < 0) {
     return;
   }

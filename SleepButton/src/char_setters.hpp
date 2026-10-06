@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <Adafruit_NeoPixel.h>
 
-void writeDigitAtPosition(Adafruit_NeoPixel strip, uint8_t num, uint8_t pos, uint32_t color) {
+void writeDigitAtPosition(Adafruit_NeoPixel& strip, uint8_t num, uint8_t pos, uint32_t color) {
   if(num > 9) {
     Serial.println("Invalid input - specified num > 9 to single digit num display");
     return;
@@ -22,7 +22,7 @@ void writeDigitAtPosition(Adafruit_NeoPixel strip, uint8_t num, uint8_t pos, uin
   }
 }
 
-void displayAlignedNumber(Adafruit_NeoPixel strip, uint16_t num, uint8_t pos, uint32_t color, uint8_t min_digits = 0, Alignment alignment = Alignment::RIGHT_ALIGN) {
+void displayAlignedNumber(Adafruit_NeoPixel& strip, uint16_t num, uint8_t pos, uint32_t color, uint8_t min_digits = 0, Alignment alignment = Alignment::RIGHT_ALIGN) {
   uint8_t digits = 0;
   uint16_t dcount = num;
   while(dcount >= 1) {

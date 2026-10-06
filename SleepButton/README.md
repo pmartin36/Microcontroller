@@ -4,7 +4,7 @@ A 15x5 NeoPixel matrix display driven by an ESP32, with a push button for input.
 
 ## Current state
 
-- `main.cpp` runs the button example from [HelloWorld](../../HelloWorld/): each debounced press prints `pushed` and steps a three-pixel pattern along the first row.
+- `main.cpp` runs the button example from [HelloWorld](../HelloWorld/): each debounced press prints `pushed` and steps a three-pixel pattern along the first row.
 - `char_setters.hpp` draws digits 0 to 9 from a 3x5 pixel font (`DIGITS` in `constants.hpp`), and `displayAlignedNumber` writes multi-digit numbers left, right, or center aligned.
 - `display_setters.hpp` has `setDisplayAsClockTime`, which lays out `H:MM` across the matrix. `getTime` in `utils.hpp` and `setDisplayAsNumber` are empty stubs.
 
