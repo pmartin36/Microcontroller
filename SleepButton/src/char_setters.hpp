@@ -3,8 +3,23 @@
 
 #include <Arduino.h>
 #include "utils.hpp"
+#include "glyphs.hpp"
 #include <stdint.h>
 #include <Adafruit_NeoPixel.h>
+
+// text sits on the bottom rows
+constexpr int text_top_row = num_rows - glyph_height;
+
+void writeGlyphAtPosition(Adafruit_NeoPixel& strip, const uint8_t glyph[glyph_height], uint8_t pos, uint32_t color) {
+  for(int y = 0; y < glyph_height; y++) {
+    for(int xo = 0; xo < 3; xo++) {
+      int x = pos + xo;
+      if((glyph[y] & (4 >> xo)) != 0) {
+        setPixelXY(strip, x, text_top_row + y, color);
+      }
+    }
+  }
+}
 
 void writeDigitAtPosition(Adafruit_NeoPixel& strip, uint8_t num, uint8_t pos, uint32_t color) {
   if(num > 9) {
@@ -12,14 +27,7 @@ void writeDigitAtPosition(Adafruit_NeoPixel& strip, uint8_t num, uint8_t pos, ui
     return;
   }
 
-  for(int y = 0; y < NUM_ROWS; y++) {
-    for(int xo = 0; xo < 3; xo++) {
-      int x = pos + xo;
-      if((DIGITS[num][y] & (4 >> xo)) != 0) {
-        setPixelXY(strip, x, y, color);
-      }
-    }
-  }
+  writeGlyphAtPosition(strip, DIGITS[num], pos, color);
 }
 
 void displayAlignedNumber(Adafruit_NeoPixel& strip, uint16_t num, uint8_t pos, uint32_t color, uint8_t min_digits = 0, Alignment alignment = Alignment::RIGHT_ALIGN) {
