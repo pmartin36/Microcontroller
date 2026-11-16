@@ -11,6 +11,8 @@ void ledCircleCycle(void* param);
 void ledScanCycle(void* param);
 void debugLoop();
 void setFireworkPixel(int virtualIndex, uint32_t color);
+void syncClockIfDue();
+float activePulse();
 
 Adafruit_NeoPixel numStrip(total_lights, LIGHT_PIN, NEO_GRB + NEO_KHZ800);
 Adafruit_NeoPixel fireworkStrip(total_firework_lights, FIREWORK_PIN, NEO_GRB + NEO_KHZ800);
@@ -21,6 +23,7 @@ unsigned int lastPin = 0;
 unsigned long lastChange = 0;
 
 bool clockEnabled = false;
+unsigned long lastSyncAttempt = 0;
 unsigned long showClockTime = 0;
 int pushCount = 0;
 
@@ -48,6 +51,7 @@ void setup() {
   debugMode = digitalRead(DEBUG_PIN) == LOW;
   if(!debugMode) {
     clockEnabled = syncClockTime();
+    lastSyncAttempt = millis();
   }
 
   numStrip.begin();
@@ -79,6 +83,8 @@ void loop() {
   }
   if(!buttonSettled(INPUT_BUTTON_PIN)) return;
 
+  syncClockIfDue();
+
   bool showNumber = millis() < showClockTime;
   uint64_t wakeTime = 1000000ULL * 60;
   
@@ -97,8 +103,18 @@ void loop() {
       Serial.println(wakeTime);
 
       if(!showNumber) {
+        uint32_t digitColor = numStrip.Color(0, 0, clock_digit_level);
+        uint32_t colonColor = numStrip.Color(0, 0, clock_colon_level);
+        if(isActiveTime(t)) {
+          float pulse = activePulse();
+          digitColor = numStrip.Color(clock_digit_level * pulse, 0, 0);
+          colonColor = numStrip.Color(clock_colon_level * pulse, 0, 0);
+          // keep waking often enough to animate the pulse
+          wakeTime = min(wakeTime, 20000ULL);
+        }
+
         numStrip.clear();
-        setDisplayAsClockTime(&t, numStrip, numStrip.Color(0, 0, 255));
+        setDisplayAsClockTime(&t, numStrip, digitColor, colonColor);
         numStrip.show();
       }
     }
@@ -113,6 +129,23 @@ void loop() {
   Serial.flush();
   //esp_light_sleep_start();
   delay(20);
+}
+
+void syncClockIfDue() {
+  if(millis() - lastSyncAttempt < clock_sync_interval_ms) return;
+
+  struct tm t;
+  if(getLocalTime(&t, 0) && isActiveTime(t)) return;
+
+  lastSyncAttempt = millis();
+  if(syncClockTime()) {
+    clockEnabled = true;
+  }
+}
+
+// brightness factor that breathes between 0.7 and 1.0 every 3 seconds
+float activePulse() {
+  return 0.85f + 0.15f * sinf(2 * PI * (millis() % 3000) / 3000.f);
 }
 
 void handleButton(int button) {
@@ -155,7 +188,7 @@ void debugLoop() {
 
   // redraw the text every step so the pixel the snake leaves is restored
   numStrip.clear();
-  setDisplayAsDebug(numStrip, numStrip.Color(255, 255, 255));
+  setDisplayAsDebug(numStrip, numStrip.Color(0, 255, 0));
 
   uint16_t hue = (uint32_t)snakePos * 65536 / total_lights;
   numStrip.setPixelColor(snakePos, numStrip.gamma32(numStrip.ColorHSV(hue)));

@@ -6,6 +6,7 @@
 #include <Arduino.h>
 #include "constants.hpp"
 #include "secrets.h"
+#include "esp_sntp.h"
 #include <Adafruit_NeoPixel.h>
 
 struct FireworksRing {
@@ -27,21 +28,43 @@ constexpr FireworksRing fireworksRingInfo[] = {
   {23,24,12, false}
 };
 
+// returns whether the clock holds a valid time; a failed sync keeps the previous time
 bool syncClockTime() {
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  while (WiFi.status() != WL_CONNECTED) delay(100);
-  Serial.println("wifi connected");
-
-  configTzTime("EST5EDT,M3.2.0,M11.1.0", "pool.ntp.org");  // POSIX TZ string handles DST
-  
-  uint32_t start = millis();
   struct tm t;
-  while (!getLocalTime(&t, 0) && millis() - start < 15000) delay(100);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  uint32_t start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < wifi_timeout_ms) delay(100);
+
+  if(WiFi.status() == WL_CONNECTED) {
+    Serial.println("wifi connected");
+
+    sntp_set_sync_status(SNTP_SYNC_STATUS_RESET);
+    configTzTime("EST5EDT,M3.2.0,M11.1.0", "pool.ntp.org");  // POSIX TZ string handles DST
+
+    start = millis();
+    while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED && millis() - start < wifi_timeout_ms) delay(100);
+    sntp_stop();
+  }
+  else {
+    Serial.println("wifi connect timed out");
+  }
 
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);   // WiFi is by far the biggest power draw, so turn it off
 
-  return getLocalTime(&t);
+  return getLocalTime(&t, 0);
+}
+
+bool isActiveTime(const struct tm& t) {
+  int now = t.tm_hour * 60 + t.tm_min;
+  int start = active_start_hour * 60 + active_start_minute;
+  int end = active_end_hour * 60 + active_end_minute;
+
+  if(start <= end) {
+    return now >= start && now < end;
+  }
+  return now >= start || now < end;
 }
 
 void getTimeFromTimeStruct(struct tm* t, uint8_t* h, uint8_t* m) {

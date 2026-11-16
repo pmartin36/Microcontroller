@@ -5,7 +5,7 @@
 #include "utils.hpp"
 #include "char_setters.hpp"
 
-void setDisplayAsClockTime(struct tm* t, Adafruit_NeoPixel& strip, uint32_t color) {
+void setDisplayAsClockTime(struct tm* t, Adafruit_NeoPixel& strip, uint32_t color, uint32_t colonColor) {
   strip.clear();
 
   uint8_t h, m;
@@ -20,7 +20,6 @@ void setDisplayAsClockTime(struct tm* t, Adafruit_NeoPixel& strip, uint32_t colo
   writeDigitAtPosition(strip, h, 4, color);
 
   // colon
-  uint32_t colonColor = strip.Color(0, 0, 20);
   setPixelXY(strip, 7, text_top_row + 1, colonColor);
   setPixelXY(strip, 7, text_top_row + 3, colonColor);
 
