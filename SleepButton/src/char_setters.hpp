@@ -31,15 +31,18 @@ void writeDigitAtPosition(Adafruit_NeoPixel& strip, uint8_t num, uint8_t pos, ui
   writeGlyphAtPosition(strip, DIGITS[num], pos, color, yOffset);
 }
 
-void displayAlignedNumber(Adafruit_NeoPixel& strip, uint16_t num, uint8_t pos, uint32_t color, uint8_t min_digits = 0, Alignment alignment = Alignment::RIGHT_ALIGN, int yOffset = 0) {
-  uint8_t digits = 0;
-  uint16_t dcount = num;
-  while(dcount >= 1) {
-    dcount /= 10;
+// zero still counts as one digit
+uint8_t digitCount(uint16_t num) {
+  uint8_t digits = 1;
+  while(num >= 10) {
+    num /= 10;
     digits++;
   }
-  // zero has no digits by the count above but still draws as "0"
-  digits = max(digits, max(min_digits, (uint8_t)1));
+  return digits;
+}
+
+void displayAlignedNumber(Adafruit_NeoPixel& strip, uint16_t num, uint8_t pos, uint32_t color, uint8_t min_digits = 0, Alignment alignment = Alignment::RIGHT_ALIGN, int yOffset = 0) {
+  uint8_t digits = max(digitCount(num), min_digits);
   uint8_t size = digits * 3 + (digits-1); // 3 columns per digit, 1 space between each digit
 
   uint8_t nextPos = pos;

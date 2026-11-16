@@ -26,7 +26,15 @@ constexpr int active_duration_minutes = 60;
 constexpr unsigned long count_display_ms = 4000;
 constexpr unsigned long count_scroll_ms = 250;
 constexpr unsigned long count_reveal_delay_ms = 100;
-constexpr unsigned long rainbow_cycle_ms = 2000;
+// the wave beside the count sloshes between the count and the screen edge, a column every
+// wave_column_ms, and settles flat over the last wave_settle_ms before the count scrolls away
+constexpr unsigned long wave_column_ms = 95;
+constexpr unsigned long wave_settle_ms = 400;
+constexpr float wave_half_width = 3;
+// the rainbow along the wave is wave_rainbow_columns long and moves outward a column every wave_hue_column_ms,
+// faster than the crest
+constexpr float wave_rainbow_columns = 6;
+constexpr unsigned long wave_hue_column_ms = 50;
 
 constexpr unsigned long long_press_ms = 2000;
 constexpr unsigned long setting_timeout_ms = 5000;

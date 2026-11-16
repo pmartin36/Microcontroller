@@ -46,8 +46,8 @@ float scrollTo = 0;
 unsigned long scrollStart = 0;
 
 // the count goes up only on the first press of each day's active window; that press lands on the
-// previous count, then shows the new one in a rainbow
-bool rainbowCount = false;
+// previous count, then reveals the new one in white with a sloshing rainbow wave
+bool revealCount = false;
 int countBeforePress = 0;
 int32_t lastCountedDay = 0;
 
@@ -259,18 +259,18 @@ void showPushCount() {
   // a press that starts a scroll in decides whether this showing counts; presses while it shows only restart the timer
   if(scrollTo == 0 && debugMode) {
     // debug previews the counting press every time with a temporary count that is never stored
-    rainbowCount = true;
+    revealCount = true;
     countBeforePress = pushCount;
     shownCount = pushCount + 1;
   }
   else if(scrollTo == 0) {
-    rainbowCount = false;
+    revealCount = false;
 
     struct tm t;
     if(getLocalTime(&t, 0) && isActiveTime(t, activeHour)) {
       int32_t day = activeWindowDay(t, activeHour);
       if(day != lastCountedDay) {
-        rainbowCount = true;
+        revealCount = true;
         countBeforePress = pushCount;
         pushCount++;
         lastCountedDay = day;
@@ -294,14 +294,21 @@ void drawPushCount(int scrollRows) {
   int countOffset = scrollRows - count_scroll_rows;
   // the old count shows while scrolling in and for count_reveal_delay_ms after landing
   bool beforeReveal = scrollTo == count_scroll_rows && millis() - scrollStart < count_scroll_ms + count_reveal_delay_ms;
-  bool showOld = rainbowCount && beforeReveal;
+  bool showOld = revealCount && beforeReveal;
 
-  setDisplayAsNumber(showOld ? countBeforePress : shownCount, numStrip, numStrip.Color(clock_digit_level, 0, 0), countOffset);
-  if(!rainbowCount || showOld) return;
+  if(!revealCount || showOld) {
+    setDisplayAsNumber(showOld ? countBeforePress : shownCount, numStrip, numStrip.Color(clock_digit_level, 0, 0), countOffset);
+    return;
+  }
 
-  uint16_t hue = (millis() % rainbow_cycle_ms) * 65536 / rainbow_cycle_ms;
-  int top = text_top_row + countOffset;
-  recolorRowsAsRainbow(numStrip, top, top + glyph_height - 1, hue, clock_digit_level);
+  setDisplayAsNumber(shownCount, numStrip, numStrip.Color(clock_digit_level, clock_digit_level, clock_digit_level), countOffset);
+
+  // the wave sloshes until the last wave_settle_ms before the count scrolls away, including when presses extend it
+  unsigned long sinceReveal = millis() - (scrollStart + count_scroll_ms + count_reveal_delay_ms);
+  if(scrollTo == count_scroll_rows) {
+    float envelope = min(1.f, (float)(showClockTime - millis()) / wave_settle_ms);
+    setDisplayAsWave(shownCount, numStrip, sinceReveal, envelope, clock_digit_level, countOffset);
+  }
 }
 
 void enterSettingMode() {
