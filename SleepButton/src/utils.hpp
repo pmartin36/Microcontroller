@@ -71,7 +71,12 @@ bool syncClockWithRetries() {
   return false;
 }
 
-// identifies the day the current active window started on, as year * 1000 + day of year
+// identifies a calendar day as year * 1000 + day of year
+int32_t calendarDay(const struct tm& t) {
+  return (t.tm_year + 1900) * 1000 + t.tm_yday;
+}
+
+// identifies the day the current active window started on, in calendarDay form
 int32_t activeWindowDay(const struct tm& t, int activeHour) {
   struct tm start = t;
   start.tm_hour = activeHour;
@@ -84,7 +89,7 @@ int32_t activeWindowDay(const struct tm& t, int activeHour) {
   }
   mktime(&start);
 
-  return (start.tm_year + 1900) * 1000 + start.tm_yday;
+  return calendarDay(start);
 }
 
 bool isActiveTime(const struct tm& t, int activeHour) {

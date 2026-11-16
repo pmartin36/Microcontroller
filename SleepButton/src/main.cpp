@@ -21,7 +21,8 @@ void syncClockIfDue();
 float activePulse();
 void scrollToward(float target);
 float scrollOffset();
-bool drawPushCount(int scrollRows);
+void drawPushCount(int scrollRows);
+void setOuterRing(uint32_t color);
 
 Adafruit_NeoPixel numStrip(total_lights, LIGHT_PIN, NEO_GRB + NEO_KHZ800);
 Adafruit_NeoPixel fireworkStrip(total_firework_lights, FIREWORK_PIN, NEO_GRB + NEO_KHZ800);
@@ -102,14 +103,11 @@ void setup() {
   fireworkStrip.setBrightness(50);
   fireworkStrip.clear();
 
+  fireworkStrip.show();
+
   if(debugMode) {
-    fireworkStrip.show();
     return;
   }
-
-  xTaskCreatePinnedToCore(
-    ledScanCycle, "ledCycle", 4096, NULL, 2, &ledTask, 0
-  );
 
   setLights();
 }
@@ -127,6 +125,7 @@ void loop() {
     enterSettingMode();
   }
   if(settingMode) {
+    setOuterRing(0);
     settingLoop();
     delay(20);
     return;
@@ -134,30 +133,34 @@ void loop() {
 
   syncClockIfDue();
 
-  bool showNumber = millis() < showClockTime;
-  uint64_t wakeTime = 1000000ULL * 60;
-
-  scrollToward(showNumber ? count_scroll_rows : 0);
-  float offset = scrollOffset();
-  int scrollRows = lroundf(offset);
+  scrollToward(millis() < showClockTime ? count_scroll_rows : 0);
+  int scrollRows = lroundf(scrollOffset());
 
   numStrip.clear();
   uint32_t digitColor = numStrip.Color(0, 0, clock_digit_level);
   uint32_t colonColor = numStrip.Color(0, 0, clock_colon_level);
 
+  uint32_t ringColor = 0;
+
   struct tm t;
   if(clockEnabled && getLocalTime(&t)) {
-    wakeTime = (60 - t.tm_sec) * 1000000ULL;
-    Serial.print("showing time, sleep for");
-    Serial.println(wakeTime);
-
-    // the pulse invites the day's counting press, so it stops once today is counted
-    if(isActiveTime(t, activeHour) && activeWindowDay(t, activeHour) != lastCountedDay) {
+    if(isActiveTime(t, activeHour)) {
+      // the clock and outer ring pulse through the window: red until the day's press, green after
       float pulse = activePulse();
-      digitColor = numStrip.Color(clock_digit_level * pulse, 0, 0);
-      colonColor = numStrip.Color(clock_colon_level * pulse, 0, 0);
-      // keep waking often enough to animate the pulse
-      wakeTime = min(wakeTime, 20000ULL);
+      if(activeWindowDay(t, activeHour) == lastCountedDay) {
+        digitColor = numStrip.Color(0, clock_digit_level * pulse, 0);
+        colonColor = numStrip.Color(0, clock_colon_level * pulse, 0);
+      }
+      else {
+        digitColor = numStrip.Color(clock_digit_level * pulse, 0, 0);
+        colonColor = numStrip.Color(clock_colon_level * pulse, 0, 0);
+      }
+      ringColor = digitColor;
+    }
+    else if(calendarDay(t) == lastCountedDay) {
+      // green from the day's press until midnight, blue otherwise
+      digitColor = numStrip.Color(0, clock_digit_level, 0);
+      colonColor = numStrip.Color(0, clock_colon_level, 0);
     }
 
     setDisplayAsClockTime(&t, numStrip, digitColor, colonColor, scrollRows);
@@ -165,25 +168,11 @@ void loop() {
   else {
     setDisplayAsClockPlaceholder(numStrip, digitColor, colonColor, scrollRows);
   }
-  if(drawPushCount(scrollRows)) {
-    // keep waking often enough to animate the rainbow
-    wakeTime = min(wakeTime, 20000ULL);
-  }
+  drawPushCount(scrollRows);
   numStrip.show();
+  // the outer firework ring pulses along with the clock and is dark otherwise
+  setOuterRing(ringColor);
 
-  if(showNumber) {
-    wakeTime = min((showClockTime - millis()) * 1000ULL, wakeTime);
-  }
-  if(offset != scrollTo) {
-    // keep waking often enough to animate the scroll
-    wakeTime = min(wakeTime, 20000ULL);
-  }
-
-  esp_sleep_enable_timer_wakeup(wakeTime);
-  gpio_wakeup_enable((gpio_num_t)INPUT_BUTTON_PIN, lastStable ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL);
-  esp_sleep_enable_gpio_wakeup();
-  Serial.flush();
-  //esp_light_sleep_start();
   delay(20);
 }
 
@@ -298,21 +287,20 @@ void showPushCount() {
   showClockTime = max(millis(), scrollStart + count_scroll_ms) + count_display_ms;
 }
 
-// draws the push count above the clock at the current scroll; returns whether the rainbow needs animating
-bool drawPushCount(int scrollRows) {
-  if(scrollRows <= 0) return false;
+// draws the push count above the clock at the current scroll
+void drawPushCount(int scrollRows) {
+  if(scrollRows <= 0) return;
 
   int countOffset = scrollRows - count_scroll_rows;
   bool scrollingIn = scrollTo == count_scroll_rows && millis() - scrollStart < count_scroll_ms;
   bool showOld = rainbowCount && scrollingIn;
 
   setDisplayAsNumber(showOld ? countBeforePress : shownCount, numStrip, numStrip.Color(clock_digit_level, 0, 0), countOffset);
-  if(!rainbowCount || showOld) return false;
+  if(!rainbowCount || showOld) return;
 
   uint16_t hue = (millis() % rainbow_cycle_ms) * 65536 / rainbow_cycle_ms;
   int top = text_top_row + countOffset;
   recolorRowsAsRainbow(numStrip, top, top + glyph_height - 1, hue, clock_digit_level);
-  return true;
 }
 
 void enterSettingMode() {
@@ -400,6 +388,19 @@ void setLights() {
 void setFireworkPixel(int virtualIndex, uint32_t color) {
   if(virtualIndex < 0 || virtualIndex >= total_firework_lights) return;
   fireworkStrip.setPixelColor(getPhysicalFireworkPixelForVirtualIndex(virtualIndex), color);
+}
+
+// only sends to the strip when the color changes, so a dark ring costs nothing per loop
+void setOuterRing(uint32_t color) {
+  static uint32_t shownColor = 0;
+  if(color == shownColor) return;
+  shownColor = color;
+
+  const auto& ring = fireworksRingInfo[3];
+  for(int i = ring.start; i < getFireworkRingEnd(ring); i++) {
+    setFireworkPixel(i, color);
+  }
+  fireworkStrip.show();
 }
 
 void ledScanCycle(void *param) {
