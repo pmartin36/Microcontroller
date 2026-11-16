@@ -20,8 +20,12 @@ constexpr uint8_t clock_digit_level = 217;
 constexpr uint8_t clock_colon_level = 58;
 
 // the button is active daily for active_duration_minutes starting at the active hour
-constexpr int default_active_hour = 7;
+constexpr int default_active_hour = 23;
 constexpr int active_duration_minutes = 60;
+
+constexpr unsigned long count_display_ms = 4000;
+constexpr unsigned long count_scroll_ms = 500;
+constexpr unsigned long rainbow_cycle_ms = 2000;
 
 constexpr unsigned long long_press_ms = 2000;
 constexpr unsigned long setting_timeout_ms = 5000;
@@ -34,6 +38,7 @@ constexpr uint8_t setting_b = 255;
 
 constexpr unsigned long clock_sync_interval_ms = 60UL * 60 * 1000;
 constexpr unsigned long wifi_timeout_ms = 15000;
+constexpr int clock_sync_attempts = 3;
 
 enum Alignment {
   LEFT_ALIGN,

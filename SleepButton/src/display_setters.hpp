@@ -5,25 +5,48 @@
 #include "utils.hpp"
 #include "char_setters.hpp"
 
-void setDisplayAsClockTime(struct tm* t, Adafruit_NeoPixel& strip, uint32_t color, uint32_t colonColor) {
-  strip.clear();
-
+void setDisplayAsClockTime(struct tm* t, Adafruit_NeoPixel& strip, uint32_t color, uint32_t colonColor, int yOffset = 0) {
   uint8_t h, m;
   getTimeFromTimeStruct(t, &h, &m);
 
   // columns: tens-of-hours 0-2, gap 3, hour 4-6, colon 7, minutes 8-10 and 12-14
-  writeDigitAtPosition(strip, h / 10, 0, color);
-  writeDigitAtPosition(strip, h % 10, 4, color);
+  writeDigitAtPosition(strip, h / 10, 0, color, yOffset);
+  writeDigitAtPosition(strip, h % 10, 4, color, yOffset);
 
   // colon
-  setPixelXY(strip, 7, text_top_row + 1, colonColor);
-  setPixelXY(strip, 7, text_top_row + 3, colonColor);
+  setPixelXY(strip, 7, text_top_row + 1 + yOffset, colonColor);
+  setPixelXY(strip, 7, text_top_row + 3 + yOffset, colonColor);
 
-  displayAlignedNumber(strip, m, 8, color, 2, Alignment::LEFT_ALIGN);
+  displayAlignedNumber(strip, m, 8, color, 2, Alignment::LEFT_ALIGN, yOffset);
 }
 
-void setDisplayAsNumber(uint16_t num, Adafruit_NeoPixel& strip, uint32_t color) {
-  displayAlignedNumber(strip, num, lights_per_row-1, color, 0, Alignment::RIGHT_ALIGN);
+// "--:--" in the clock layout, for when there is no valid time
+void setDisplayAsClockPlaceholder(Adafruit_NeoPixel& strip, uint32_t color, uint32_t colonColor, int yOffset = 0) {
+  writeGlyphAtPosition(strip, GLYPH_DASH, 0, color, yOffset);
+  writeGlyphAtPosition(strip, GLYPH_DASH, 4, color, yOffset);
+
+  setPixelXY(strip, 7, text_top_row + 1 + yOffset, colonColor);
+  setPixelXY(strip, 7, text_top_row + 3 + yOffset, colonColor);
+
+  writeGlyphAtPosition(strip, GLYPH_DASH, 8, color, yOffset);
+  writeGlyphAtPosition(strip, GLYPH_DASH, 12, color, yOffset);
+}
+
+void setDisplayAsNumber(uint16_t num, Adafruit_NeoPixel& strip, uint32_t color, int yOffset = 0) {
+  displayAlignedNumber(strip, num, lights_per_row-1, color, 0, Alignment::RIGHT_ALIGN, yOffset);
+}
+
+// recolors the lit pixels in rows top through bottom with a rainbow that steps a sixth of the wheel per row from hue
+void recolorRowsAsRainbow(Adafruit_NeoPixel& strip, int top, int bottom, uint16_t hue, uint8_t level) {
+  for(int y = max(top, 0); y <= bottom && y < num_rows; y++) {
+    uint32_t color = strip.gamma32(strip.ColorHSV(hue + (y - top) * (65536 / 6), 255, level));
+    for(int x = 0; x < lights_per_row; x++) {
+      int index = getPixelIndexXY(x, y);
+      if(strip.getPixelColor(index) != 0) {
+        strip.setPixelColor(index, color);
+      }
+    }
+  }
 }
 
 // shows a 0-23 hour as 12-hour time with an A/P suffix, e.g. "11P", centered
@@ -51,11 +74,16 @@ void setDisplayAsCountdown(uint8_t remaining, Adafruit_NeoPixel& strip, uint32_t
   }
 }
 
-void setDisplayAsDebug(Adafruit_NeoPixel& strip, uint32_t color) {
-  // "DBG" is 11 columns wide (3 glyphs + 2 gaps), centered in 15
-  writeGlyphAtPosition(strip, GLYPH_D, 2, color);
-  writeGlyphAtPosition(strip, GLYPH_B, 6, color);
-  writeGlyphAtPosition(strip, GLYPH_G, 10, color);
+// "0D:BG" in the clock layout, standing in for the time in debug mode
+void setDisplayAsDebugClock(Adafruit_NeoPixel& strip, uint32_t color, uint32_t colonColor, int yOffset = 0) {
+  writeDigitAtPosition(strip, 0, 0, color, yOffset);
+  writeGlyphAtPosition(strip, GLYPH_D, 4, color, yOffset);
+
+  setPixelXY(strip, 7, text_top_row + 1 + yOffset, colonColor);
+  setPixelXY(strip, 7, text_top_row + 3 + yOffset, colonColor);
+
+  writeGlyphAtPosition(strip, GLYPH_B, 8, color, yOffset);
+  writeGlyphAtPosition(strip, GLYPH_G, 12, color, yOffset);
 }
 
 #endif

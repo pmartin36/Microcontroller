@@ -10,27 +10,28 @@
 // text sits on the bottom rows
 constexpr int text_top_row = num_rows - glyph_height;
 
-void writeGlyphAtPosition(Adafruit_NeoPixel& strip, const uint8_t glyph[glyph_height], uint8_t pos, uint32_t color) {
+// yOffset shifts the glyph down by that many rows; rows that land off the display are skipped
+void writeGlyphAtPosition(Adafruit_NeoPixel& strip, const uint8_t glyph[glyph_height], uint8_t pos, uint32_t color, int yOffset = 0) {
   for(int y = 0; y < glyph_height; y++) {
     for(int xo = 0; xo < 3; xo++) {
       int x = pos + xo;
       if((glyph[y] & (4 >> xo)) != 0) {
-        setPixelXY(strip, x, text_top_row + y, color);
+        setPixelXY(strip, x, text_top_row + y + yOffset, color);
       }
     }
   }
 }
 
-void writeDigitAtPosition(Adafruit_NeoPixel& strip, uint8_t num, uint8_t pos, uint32_t color) {
+void writeDigitAtPosition(Adafruit_NeoPixel& strip, uint8_t num, uint8_t pos, uint32_t color, int yOffset = 0) {
   if(num > 9) {
     Serial.println("Invalid input - specified num > 9 to single digit num display");
     return;
   }
 
-  writeGlyphAtPosition(strip, DIGITS[num], pos, color);
+  writeGlyphAtPosition(strip, DIGITS[num], pos, color, yOffset);
 }
 
-void displayAlignedNumber(Adafruit_NeoPixel& strip, uint16_t num, uint8_t pos, uint32_t color, uint8_t min_digits = 0, Alignment alignment = Alignment::RIGHT_ALIGN) {
+void displayAlignedNumber(Adafruit_NeoPixel& strip, uint16_t num, uint8_t pos, uint32_t color, uint8_t min_digits = 0, Alignment alignment = Alignment::RIGHT_ALIGN, int yOffset = 0) {
   uint8_t digits = 0;
   uint16_t dcount = num;
   while(dcount >= 1) {
@@ -55,7 +56,7 @@ void displayAlignedNumber(Adafruit_NeoPixel& strip, uint16_t num, uint8_t pos, u
   while(digits >= 1) {
     uint8_t digit = num % 10;
 
-    writeDigitAtPosition(strip, digit, nextPos, color);
+    writeDigitAtPosition(strip, digit, nextPos, color, yOffset);
     nextPos -= 4;
     digits--;
 

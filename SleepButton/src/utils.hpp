@@ -28,9 +28,9 @@ constexpr FireworksRing fireworksRingInfo[] = {
   {23,24,12, false}
 };
 
-// returns whether the clock holds a valid time; a failed sync keeps the previous time
+// returns whether the clock synced; a failed sync keeps the previous time
 bool syncClockTime() {
-  struct tm t;
+  bool synced = false;
 
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   uint32_t start = millis();
@@ -43,8 +43,16 @@ bool syncClockTime() {
     configTzTime("EST5EDT,M3.2.0,M11.1.0", "pool.ntp.org");  // POSIX TZ string handles DST
 
     start = millis();
-    while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED && millis() - start < wifi_timeout_ms) delay(100);
+    // the status reads COMPLETED once and then resets, so it is captured on the read that sees it
+    while (!synced && millis() - start < wifi_timeout_ms) {
+      synced = sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED;
+      if(!synced) delay(100);
+    }
     sntp_stop();
+
+    if(!synced) {
+      Serial.println("ntp sync timed out");
+    }
   }
   else {
     Serial.println("wifi connect timed out");
@@ -53,7 +61,30 @@ bool syncClockTime() {
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);   // WiFi is by far the biggest power draw, so turn it off
 
-  return getLocalTime(&t, 0);
+  return synced;
+}
+
+bool syncClockWithRetries() {
+  for(int i = 0; i < clock_sync_attempts; i++) {
+    if(syncClockTime()) return true;
+  }
+  return false;
+}
+
+// identifies the day the current active window started on, as year * 1000 + day of year
+int32_t activeWindowDay(const struct tm& t, int activeHour) {
+  struct tm start = t;
+  start.tm_hour = activeHour;
+  start.tm_min = 0;
+  start.tm_sec = 0;
+  start.tm_isdst = -1;
+  if(t.tm_hour < activeHour) {
+    // the window crosses midnight and started the previous day
+    start.tm_mday -= 1;
+  }
+  mktime(&start);
+
+  return (start.tm_year + 1900) * 1000 + start.tm_yday;
 }
 
 bool isActiveTime(const struct tm& t, int activeHour) {
@@ -83,12 +114,13 @@ bool getDisplayTime(uint8_t* h, uint8_t* m) {
   return true;
 }
 
-void setPixelXY(Adafruit_NeoPixel& strip, uint8_t x, uint8_t y, uint32_t color) {
+// returns the strip index for an x/y position, or -1 when it is off the display
+int getPixelIndexXY(int x, int y) {
   if(x >= lights_per_row || x < 0) {
-    return;
+    return -1;
   }
   else if(y >= num_rows || y < 0) {
-    return;
+    return -1;
   }
 
   // y counts down from the top row; physical rows count up from the bottom
@@ -100,6 +132,13 @@ void setPixelXY(Adafruit_NeoPixel& strip, uint8_t x, uint8_t y, uint32_t color) 
   else {
     index += (lights_per_row - x - 1);
   } 
+
+  return index;
+}
+
+void setPixelXY(Adafruit_NeoPixel& strip, int x, int y, uint32_t color) {
+  int index = getPixelIndexXY(x, y);
+  if(index < 0) return;
 
   strip.setPixelColor(index, color);
 }

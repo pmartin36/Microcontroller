@@ -19,6 +19,9 @@ void debugLoop();
 void setFireworkPixel(int virtualIndex, uint32_t color);
 void syncClockIfDue();
 float activePulse();
+void scrollToward(float target);
+float scrollOffset();
+bool drawPushCount(int scrollRows);
 
 Adafruit_NeoPixel numStrip(total_lights, LIGHT_PIN, NEO_GRB + NEO_KHZ800);
 Adafruit_NeoPixel fireworkStrip(total_firework_lights, FIREWORK_PIN, NEO_GRB + NEO_KHZ800);
@@ -32,7 +35,20 @@ bool clockEnabled = false;
 unsigned long lastSyncAttempt = 0;
 unsigned long showClockTime = 0;
 int pushCount = 0;
+int shownCount = 0;
 unsigned long pressStart = 0;
+
+// the push count sits one blank row above the clock and both scroll down together
+constexpr int count_scroll_rows = glyph_height + 1;
+float scrollFrom = 0;
+float scrollTo = 0;
+unsigned long scrollStart = 0;
+
+// the count goes up only on the first press of each day's active window; that press lands on the
+// previous count, then shows the new one in a rainbow
+bool rainbowCount = false;
+int countBeforePress = 0;
+int32_t lastCountedDay = 0;
 
 Preferences prefs;
 uint8_t activeHour = default_active_hour;
@@ -67,14 +83,20 @@ void setup() {
 
   prefs.begin("sleepbutton", false);
   activeHour = prefs.getUChar("active_hour", default_active_hour);
-  if(!debugMode) {
-    clockEnabled = syncClockTime();
-    lastSyncAttempt = millis();
-  }
+  pushCount = prefs.getInt("push_count", 0);
+  lastCountedDay = prefs.getInt("counted_day", 0);
 
   numStrip.begin();
   numStrip.setBrightness(50);
   numStrip.clear();
+
+  if(!debugMode) {
+    setDisplayAsClockPlaceholder(numStrip, numStrip.Color(0, 0, clock_digit_level), numStrip.Color(0, 0, clock_colon_level));
+    numStrip.show();
+
+    clockEnabled = syncClockWithRetries();
+    lastSyncAttempt = millis();
+  }
 
   fireworkStrip.begin();
   fireworkStrip.setBrightness(50);
@@ -114,40 +136,47 @@ void loop() {
 
   bool showNumber = millis() < showClockTime;
   uint64_t wakeTime = 1000000ULL * 60;
-  
-  if(clockEnabled) {
-    struct tm t;
-    bool hasClockTime = getLocalTime(&t);
-    if(!hasClockTime) {
-      Serial.println("Trying to show time but failing");
-      if(!showNumber) {
-        // display -:--
-      }
-    }
-    else {
-      wakeTime = (60 - t.tm_sec) * 1000000ULL;
-      Serial.print("showing time, sleep for");
-      Serial.println(wakeTime);
 
-      if(!showNumber) {
-        uint32_t digitColor = numStrip.Color(0, 0, clock_digit_level);
-        uint32_t colonColor = numStrip.Color(0, 0, clock_colon_level);
-        if(isActiveTime(t, activeHour)) {
-          float pulse = activePulse();
-          digitColor = numStrip.Color(clock_digit_level * pulse, 0, 0);
-          colonColor = numStrip.Color(clock_colon_level * pulse, 0, 0);
-          // keep waking often enough to animate the pulse
-          wakeTime = min(wakeTime, 20000ULL);
-        }
+  scrollToward(showNumber ? count_scroll_rows : 0);
+  float offset = scrollOffset();
+  int scrollRows = lroundf(offset);
 
-        numStrip.clear();
-        setDisplayAsClockTime(&t, numStrip, digitColor, colonColor);
-        numStrip.show();
-      }
+  numStrip.clear();
+  uint32_t digitColor = numStrip.Color(0, 0, clock_digit_level);
+  uint32_t colonColor = numStrip.Color(0, 0, clock_colon_level);
+
+  struct tm t;
+  if(clockEnabled && getLocalTime(&t)) {
+    wakeTime = (60 - t.tm_sec) * 1000000ULL;
+    Serial.print("showing time, sleep for");
+    Serial.println(wakeTime);
+
+    // the pulse invites the day's counting press, so it stops once today is counted
+    if(isActiveTime(t, activeHour) && activeWindowDay(t, activeHour) != lastCountedDay) {
+      float pulse = activePulse();
+      digitColor = numStrip.Color(clock_digit_level * pulse, 0, 0);
+      colonColor = numStrip.Color(clock_colon_level * pulse, 0, 0);
+      // keep waking often enough to animate the pulse
+      wakeTime = min(wakeTime, 20000ULL);
     }
+
+    setDisplayAsClockTime(&t, numStrip, digitColor, colonColor, scrollRows);
   }
+  else {
+    setDisplayAsClockPlaceholder(numStrip, digitColor, colonColor, scrollRows);
+  }
+  if(drawPushCount(scrollRows)) {
+    // keep waking often enough to animate the rainbow
+    wakeTime = min(wakeTime, 20000ULL);
+  }
+  numStrip.show();
+
   if(showNumber) {
     wakeTime = min((showClockTime - millis()) * 1000ULL, wakeTime);
+  }
+  if(offset != scrollTo) {
+    // keep waking often enough to animate the scroll
+    wakeTime = min(wakeTime, 20000ULL);
   }
 
   esp_sleep_enable_timer_wakeup(wakeTime);
@@ -165,9 +194,25 @@ void syncClockIfDue() {
   if(getLocalTime(&t, 0) && isActiveTime(t, activeHour)) return;
 
   lastSyncAttempt = millis();
-  if(syncClockTime()) {
+  if(syncClockWithRetries()) {
     clockEnabled = true;
   }
+}
+
+// starts a count_scroll_ms scroll from the current offset; a reversal mid-scroll starts from where it is
+void scrollToward(float target) {
+  if(target == scrollTo) return;
+
+  scrollFrom = scrollOffset();
+  scrollTo = target;
+  scrollStart = millis();
+}
+
+// halfway between linear and a quadratic ease-out: 1.5t - 0.5t^2
+float scrollOffset() {
+  float t = min(1.f, (float)(millis() - scrollStart) / count_scroll_ms);
+  float eased = 1.5f * t - 0.5f * t * t;
+  return scrollFrom + (scrollTo - scrollFrom) * eased;
 }
 
 // brightness factor that breathes between 0.7 and 1.0 every 3 seconds
@@ -189,6 +234,9 @@ void handleButton(int button) {
       // center firework LED lights while the button is held
       setFireworkPixel(0, lastStable == HIGH ? fireworkStrip.Color(255, 255, 255) : 0);
       fireworkStrip.show();
+      if(lastStable == LOW) {
+        showPushCount();
+      }
     }
     else if(lastStable == HIGH) {
       onPress();
@@ -218,11 +266,53 @@ void onRelease() {
 
 void showPushCount() {
   Serial.println("pushed");
-  pushCount++;
-  showClockTime = millis() + 4000;
-  numStrip.clear();
-  setDisplayAsNumber(pushCount, numStrip, numStrip.Color(0, 255, 0));
-  numStrip.show();
+
+  // a press that starts a scroll in decides whether this showing counts; presses while it shows only restart the timer
+  if(scrollTo == 0 && debugMode) {
+    // debug previews the counting press every time with a temporary count that is never stored
+    rainbowCount = true;
+    countBeforePress = pushCount;
+    shownCount = pushCount + 1;
+  }
+  else if(scrollTo == 0) {
+    rainbowCount = false;
+
+    struct tm t;
+    if(getLocalTime(&t, 0) && isActiveTime(t, activeHour)) {
+      int32_t day = activeWindowDay(t, activeHour);
+      if(day != lastCountedDay) {
+        rainbowCount = true;
+        countBeforePress = pushCount;
+        pushCount++;
+        lastCountedDay = day;
+
+        prefs.putInt("push_count", pushCount);
+        prefs.putInt("counted_day", lastCountedDay);
+      }
+    }
+    shownCount = pushCount;
+  }
+
+  // the display timer starts once the count has scrolled in; presses while it shows restart it
+  scrollToward(count_scroll_rows);
+  showClockTime = max(millis(), scrollStart + count_scroll_ms) + count_display_ms;
+}
+
+// draws the push count above the clock at the current scroll; returns whether the rainbow needs animating
+bool drawPushCount(int scrollRows) {
+  if(scrollRows <= 0) return false;
+
+  int countOffset = scrollRows - count_scroll_rows;
+  bool scrollingIn = scrollTo == count_scroll_rows && millis() - scrollStart < count_scroll_ms;
+  bool showOld = rainbowCount && scrollingIn;
+
+  setDisplayAsNumber(showOld ? countBeforePress : shownCount, numStrip, numStrip.Color(clock_digit_level, 0, 0), countOffset);
+  if(!rainbowCount || showOld) return false;
+
+  uint16_t hue = (millis() % rainbow_cycle_ms) * 65536 / rainbow_cycle_ms;
+  int top = text_top_row + countOffset;
+  recolorRowsAsRainbow(numStrip, top, top + glyph_height - 1, hue, clock_digit_level);
+  return true;
 }
 
 void enterSettingMode() {
@@ -235,6 +325,8 @@ void enterSettingMode() {
 void exitSettingMode() {
   settingMode = false;
   showClockTime = 0;
+  scrollFrom = 0;
+  scrollTo = 0;
   if(activeHour != savedActiveHour) {
     prefs.putUChar("active_hour", activeHour);
   }
@@ -274,22 +366,25 @@ void settingLoop() {
   numStrip.show();
 }
 
+// debug mode treats every minute as inside the active window, with "0D:BG" in place of the time
 void debugLoop() {
-  static unsigned long lastStep = 0;
-  static int snakePos = 0;
+  scrollToward(millis() < showClockTime ? count_scroll_rows : 0);
+  int scrollRows = lroundf(scrollOffset());
 
-  if(millis() - lastStep < 1000 / 15) return;
-  lastStep = millis();
-
-  // redraw the text every step so the pixel the snake leaves is restored
+  // redraw everything each frame so the pixel the snake leaves is restored
   numStrip.clear();
-  setDisplayAsDebug(numStrip, numStrip.Color(0, 255, 0));
 
+  float pulse = activePulse();
+  setDisplayAsDebugClock(numStrip, numStrip.Color(clock_digit_level * pulse, 0, 0), numStrip.Color(clock_colon_level * pulse, 0, 0), scrollRows);
+  drawPushCount(scrollRows);
+
+  // the snake steps 15 times a second through the whole strip
+  int snakePos = (millis() / (1000 / 15)) % total_lights;
   uint16_t hue = (uint32_t)snakePos * 65536 / total_lights;
   numStrip.setPixelColor(snakePos, numStrip.gamma32(numStrip.ColorHSV(hue)));
   numStrip.show();
 
-  snakePos = (snakePos + 1) % total_lights;
+  delay(20);
 }
 
 void setLights() {
