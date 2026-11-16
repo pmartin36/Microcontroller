@@ -19,11 +19,18 @@ constexpr int total_firework_lights = 47;
 constexpr uint8_t clock_digit_level = 217;
 constexpr uint8_t clock_colon_level = 58;
 
-// daily window when the button is active; it may cross midnight
-constexpr int active_start_hour = 7;
-constexpr int active_start_minute = 0;
-constexpr int active_end_hour = 8;
-constexpr int active_end_minute = 0;
+// the button is active daily for active_duration_minutes starting at the active hour
+constexpr int default_active_hour = 7;
+constexpr int active_duration_minutes = 60;
+
+constexpr unsigned long long_press_ms = 2000;
+constexpr unsigned long setting_timeout_ms = 5000;
+constexpr unsigned long setting_flash_ms = 250;
+
+// light blue
+constexpr uint8_t setting_r = 110;
+constexpr uint8_t setting_g = 190;
+constexpr uint8_t setting_b = 255;
 
 constexpr unsigned long clock_sync_interval_ms = 60UL * 60 * 1000;
 constexpr unsigned long wifi_timeout_ms = 15000;

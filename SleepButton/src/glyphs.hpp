@@ -21,5 +21,7 @@ const uint8_t DIGITS[10][glyph_height] = {
 const uint8_t GLYPH_D[glyph_height] = {0b110, 0b101, 0b101, 0b101, 0b110};
 const uint8_t GLYPH_B[glyph_height] = {0b110, 0b101, 0b110, 0b101, 0b110};
 const uint8_t GLYPH_G[glyph_height] = {0b011, 0b100, 0b101, 0b101, 0b011};
+const uint8_t GLYPH_A[glyph_height] = {0b010, 0b101, 0b111, 0b101, 0b101};
+const uint8_t GLYPH_P[glyph_height] = {0b110, 0b101, 0b110, 0b100, 0b100};
 
 #endif

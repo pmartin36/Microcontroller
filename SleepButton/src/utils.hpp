@@ -56,10 +56,10 @@ bool syncClockTime() {
   return getLocalTime(&t, 0);
 }
 
-bool isActiveTime(const struct tm& t) {
+bool isActiveTime(const struct tm& t, int activeHour) {
   int now = t.tm_hour * 60 + t.tm_min;
-  int start = active_start_hour * 60 + active_start_minute;
-  int end = active_end_hour * 60 + active_end_minute;
+  int start = activeHour * 60;
+  int end = (start + active_duration_minutes) % (24 * 60);
 
   if(start <= end) {
     return now >= start && now < end;

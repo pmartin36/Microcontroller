@@ -1,10 +1,16 @@
 #include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
+#include <Preferences.h>
 #include "constants.hpp"
 #include "display_setters.hpp"
 
 /** EXAMPLE **/
 void onPress();
+void onRelease();
+void showPushCount();
+void enterSettingMode();
+void exitSettingMode();
+void settingLoop();
 void setLights();
 void handleButton(int button);
 void ledCircleCycle(void* param);
@@ -26,6 +32,15 @@ bool clockEnabled = false;
 unsigned long lastSyncAttempt = 0;
 unsigned long showClockTime = 0;
 int pushCount = 0;
+unsigned long pressStart = 0;
+
+Preferences prefs;
+uint8_t activeHour = default_active_hour;
+
+bool settingMode = false;
+uint8_t savedActiveHour = default_active_hour;
+unsigned long lastSettingInteraction = 0;
+unsigned long lastSettingTap = 0;
 
 bool debugMode = false;
 
@@ -49,6 +64,9 @@ void setup() {
   Serial.println(digitalRead(DEBUG_PIN));
 
   debugMode = digitalRead(DEBUG_PIN) == LOW;
+
+  prefs.begin("sleepbutton", false);
+  activeHour = prefs.getUChar("active_hour", default_active_hour);
   if(!debugMode) {
     clockEnabled = syncClockTime();
     lastSyncAttempt = millis();
@@ -83,6 +101,15 @@ void loop() {
   }
   if(!buttonSettled(INPUT_BUTTON_PIN)) return;
 
+  if(!settingMode && lastStable == HIGH && millis() - pressStart >= long_press_ms) {
+    enterSettingMode();
+  }
+  if(settingMode) {
+    settingLoop();
+    delay(20);
+    return;
+  }
+
   syncClockIfDue();
 
   bool showNumber = millis() < showClockTime;
@@ -105,7 +132,7 @@ void loop() {
       if(!showNumber) {
         uint32_t digitColor = numStrip.Color(0, 0, clock_digit_level);
         uint32_t colonColor = numStrip.Color(0, 0, clock_colon_level);
-        if(isActiveTime(t)) {
+        if(isActiveTime(t, activeHour)) {
           float pulse = activePulse();
           digitColor = numStrip.Color(clock_digit_level * pulse, 0, 0);
           colonColor = numStrip.Color(clock_colon_level * pulse, 0, 0);
@@ -135,7 +162,7 @@ void syncClockIfDue() {
   if(millis() - lastSyncAttempt < clock_sync_interval_ms) return;
 
   struct tm t;
-  if(getLocalTime(&t, 0) && isActiveTime(t)) return;
+  if(getLocalTime(&t, 0) && isActiveTime(t, activeHour)) return;
 
   lastSyncAttempt = millis();
   if(syncClockTime()) {
@@ -166,16 +193,84 @@ void handleButton(int button) {
     else if(lastStable == HIGH) {
       onPress();
     }
+    else {
+      onRelease();
+    }
   }
   digitalWrite(ONBOARD_LED_PIN, lastStable);
 }
 
 void onPress() {
+  pressStart = millis();
+
+  if(settingMode) {
+    activeHour = (activeHour + 1) % 24;
+    lastSettingTap = millis();
+  }
+}
+
+// a long press enters setting mode before release, so only short presses reach showPushCount
+void onRelease() {
+  if(!settingMode) {
+    showPushCount();
+  }
+}
+
+void showPushCount() {
   Serial.println("pushed");
   pushCount++;
   showClockTime = millis() + 4000;
   numStrip.clear();
   setDisplayAsNumber(pushCount, numStrip, numStrip.Color(0, 255, 0));
+  numStrip.show();
+}
+
+void enterSettingMode() {
+  settingMode = true;
+  savedActiveHour = activeHour;
+  lastSettingInteraction = millis();
+  lastSettingTap = millis() - setting_flash_ms;
+}
+
+void exitSettingMode() {
+  settingMode = false;
+  showClockTime = 0;
+  if(activeHour != savedActiveHour) {
+    prefs.putUChar("active_hour", activeHour);
+  }
+}
+
+void settingLoop() {
+  // the timeout counts from the last release, so holding the button keeps setting mode open
+  if(lastStable == HIGH) {
+    lastSettingInteraction = millis();
+  }
+
+  unsigned long idle = millis() - lastSettingInteraction;
+  if(idle >= setting_timeout_ms) {
+    exitSettingMode();
+    return;
+  }
+
+  // each tap ramps the text to white and back over setting_flash_ms
+  float flash = 0;
+  unsigned long sinceTap = millis() - lastSettingTap;
+  if(sinceTap < setting_flash_ms) {
+    flash = 1 - fabsf(2.f * sinceTap / setting_flash_ms - 1);
+  }
+
+  uint32_t baseColor = numStrip.Color(setting_r, setting_g, setting_b);
+  uint32_t textColor = numStrip.Color(
+    setting_r + (255 - setting_r) * flash,
+    setting_g + (255 - setting_g) * flash,
+    setting_b + (255 - setting_b) * flash
+  );
+
+  uint8_t remaining = (setting_timeout_ms - idle + 999) / 1000;
+
+  numStrip.clear();
+  setDisplayAsHour(activeHour, numStrip, textColor);
+  setDisplayAsCountdown(remaining, numStrip, baseColor);
   numStrip.show();
 }
 
