@@ -11,13 +11,9 @@ void setDisplayAsClockTime(struct tm* t, Adafruit_NeoPixel& strip, uint32_t colo
   uint8_t h, m;
   getTimeFromTimeStruct(t, &h, &m);
 
-  // columns: tens-of-hours 1 at 0-2, gap 3, hour 4-6, colon 7, minutes 8-10 and 12-14
-  if(h >= 10) {
-    writeDigitAtPosition(strip, 1, 0, color);
-    h-=10;
-  }
-
-  writeDigitAtPosition(strip, h, 4, color);
+  // columns: tens-of-hours 0-2, gap 3, hour 4-6, colon 7, minutes 8-10 and 12-14
+  writeDigitAtPosition(strip, h / 10, 0, color);
+  writeDigitAtPosition(strip, h % 10, 4, color);
 
   // colon
   setPixelXY(strip, 7, text_top_row + 1, colonColor);
