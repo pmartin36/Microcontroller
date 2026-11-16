@@ -24,7 +24,8 @@ constexpr int default_active_hour = 23;
 constexpr int active_duration_minutes = 60;
 
 constexpr unsigned long count_display_ms = 4000;
-constexpr unsigned long count_scroll_ms = 500;
+constexpr unsigned long count_scroll_ms = 250;
+constexpr unsigned long count_reveal_delay_ms = 100;
 constexpr unsigned long rainbow_cycle_ms = 2000;
 
 constexpr unsigned long long_press_ms = 2000;

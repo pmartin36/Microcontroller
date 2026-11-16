@@ -38,7 +38,8 @@ void displayAlignedNumber(Adafruit_NeoPixel& strip, uint16_t num, uint8_t pos, u
     dcount /= 10;
     digits++;
   }
-  digits = max(digits, min_digits);
+  // zero has no digits by the count above but still draws as "0"
+  digits = max(digits, max(min_digits, (uint8_t)1));
   uint8_t size = digits * 3 + (digits-1); // 3 columns per digit, 1 space between each digit
 
   uint8_t nextPos = pos;

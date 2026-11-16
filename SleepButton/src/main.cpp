@@ -292,8 +292,9 @@ void drawPushCount(int scrollRows) {
   if(scrollRows <= 0) return;
 
   int countOffset = scrollRows - count_scroll_rows;
-  bool scrollingIn = scrollTo == count_scroll_rows && millis() - scrollStart < count_scroll_ms;
-  bool showOld = rainbowCount && scrollingIn;
+  // the old count shows while scrolling in and for count_reveal_delay_ms after landing
+  bool beforeReveal = scrollTo == count_scroll_rows && millis() - scrollStart < count_scroll_ms + count_reveal_delay_ms;
+  bool showOld = rainbowCount && beforeReveal;
 
   setDisplayAsNumber(showOld ? countBeforePress : shownCount, numStrip, numStrip.Color(clock_digit_level, 0, 0), countOffset);
   if(!rainbowCount || showOld) return;

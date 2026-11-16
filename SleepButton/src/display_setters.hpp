@@ -33,7 +33,7 @@ void setDisplayAsClockPlaceholder(Adafruit_NeoPixel& strip, uint32_t color, uint
 }
 
 void setDisplayAsNumber(uint16_t num, Adafruit_NeoPixel& strip, uint32_t color, int yOffset = 0) {
-  displayAlignedNumber(strip, num, lights_per_row-1, color, 0, Alignment::RIGHT_ALIGN, yOffset);
+  displayAlignedNumber(strip, num, lights_per_row / 2, color, 0, Alignment::CENTER_ALIGN, yOffset);
 }
 
 // recolors the lit pixels in rows top through bottom with a rainbow that steps a sixth of the wheel per row from hue
