@@ -3,6 +3,7 @@
 #include <Preferences.h>
 #include "constants.hpp"
 #include "display_setters.hpp"
+#include "fireworks.hpp"
 
 /** EXAMPLE **/
 void onPress();
@@ -16,7 +17,14 @@ void handleButton(int button);
 void ledCircleCycle(void* param);
 void ledScanCycle(void* param);
 void debugLoop();
-void setFireworkPixel(int virtualIndex, uint32_t color);
+void onDebugRelease();
+void toggleFireworksMode();
+void playNextFireworkEffect();
+void startFireworkEffect(int effect);
+void stopFireworkEffect();
+void drawFireworkEffect();
+bool dayCounted(const struct tm& t);
+uint32_t flashedRingColor(uint32_t color);
 void syncClockIfDue();
 float activePulse();
 void scrollToward(float target);
@@ -60,6 +68,24 @@ unsigned long lastSettingInteraction = 0;
 unsigned long lastSettingTap = 0;
 
 bool debugMode = false;
+
+// the counting press plays a random firework effect; debug fireworks mode, which debug starts in and a long
+// press toggles, shows only the snake on the matrix and plays the next effect on each press
+bool fireworksMode = true;
+bool longPressHandled = false;
+int nextFireworkEffect = 0;
+int playingFireworkEffect = -1;
+unsigned long fireworkEffectStart = 0;
+uint32_t fireworkEffectSeed = 0;
+
+// a press that does not count flashes the outer ring red until the day is counted, green after
+bool ringFlashing = false;
+unsigned long ringFlashStart = 0;
+uint32_t ringFlashColor = 0;
+
+// the color setOuterRing last sent; ring_color_unknown makes the next call send whatever it is given
+constexpr uint32_t ring_color_unknown = 0xFFFFFFFF;
+uint32_t shownRingColor = 0;
 
 // firework debug task
 TaskHandle_t ledTask;
@@ -147,7 +173,7 @@ void loop() {
     if(isActiveTime(t, activeHour)) {
       // the clock and outer ring pulse through the window: red until the day's press, green after
       float pulse = activePulse();
-      if(activeWindowDay(t, activeHour) == lastCountedDay) {
+      if(dayCounted(t)) {
         digitColor = numStrip.Color(0, clock_digit_level * pulse, 0);
         colonColor = numStrip.Color(0, clock_colon_level * pulse, 0);
       }
@@ -157,7 +183,7 @@ void loop() {
       }
       ringColor = digitColor;
     }
-    else if(calendarDay(t) == lastCountedDay) {
+    else if(dayCounted(t)) {
       // green from the day's press until midnight, blue otherwise
       digitColor = numStrip.Color(0, clock_digit_level, 0);
       colonColor = numStrip.Color(0, clock_colon_level, 0);
@@ -170,8 +196,14 @@ void loop() {
   }
   drawPushCount(scrollRows);
   numStrip.show();
-  // the outer firework ring pulses along with the clock and is dark otherwise
-  setOuterRing(ringColor);
+
+  if(playingFireworkEffect >= 0) {
+    drawFireworkEffect();
+  }
+  else {
+    // the outer firework ring pulses along with the clock and is dark otherwise
+    setOuterRing(flashedRingColor(ringColor));
+  }
 
   delay(20);
 }
@@ -186,6 +218,32 @@ void syncClockIfDue() {
   if(syncClockWithRetries()) {
     clockEnabled = true;
   }
+}
+
+// whether the day's press has happened: through the active window that is the window's day, and after it
+// the calendar day, so the day stays counted until midnight
+bool dayCounted(const struct tm& t) {
+  int32_t day = isActiveTime(t, activeHour) ? activeWindowDay(t, activeHour) : calendarDay(t);
+  return day == lastCountedDay;
+}
+
+// blends a ring flash, ramping up to ringFlashColor and back, over the ring's own color
+uint32_t flashedRingColor(uint32_t color) {
+  unsigned long sinceFlash = millis() - ringFlashStart;
+  if(!ringFlashing || sinceFlash >= ring_flash_ms) {
+    ringFlashing = false;
+    return color;
+  }
+
+  float flash = 1 - fabsf(2.f * sinceFlash / ring_flash_ms - 1);
+  uint8_t blended[3];
+  for(int c = 0; c < 3; c++) {
+    int shift = 16 - 8 * c;
+    float from = (color >> shift) & 0xFF;
+    float to = (ringFlashColor >> shift) & 0xFF;
+    blended[c] = from + (to - from) * flash;
+  }
+  return fireworkStrip.Color(blended[0], blended[1], blended[2]);
 }
 
 // starts a count_scroll_ms scroll from the current offset; a reversal mid-scroll starts from where it is
@@ -221,10 +279,13 @@ void handleButton(int button) {
     lastStable = in;
     if(debugMode) {
       // center firework LED lights while the button is held
-      setFireworkPixel(0, lastStable == HIGH ? fireworkStrip.Color(255, 255, 255) : 0);
+      setFireworkPixel(fireworkStrip, 0, lastStable == HIGH ? fireworkStrip.Color(255, 255, 255) : 0);
       fireworkStrip.show();
-      if(lastStable == LOW) {
-        showPushCount();
+      if(lastStable == HIGH) {
+        pressStart = millis();
+      }
+      else {
+        onDebugRelease();
       }
     }
     else if(lastStable == HIGH) {
@@ -277,9 +338,21 @@ void showPushCount() {
 
         prefs.putInt("push_count", pushCount);
         prefs.putInt("counted_day", lastCountedDay);
+
+        startFireworkEffect(random(firework_effect_count));
       }
     }
     shownCount = pushCount;
+  }
+
+  // debug previews only the count; otherwise a press that does not count flashes the outer ring, unless a
+  // celebration is playing on the rings, including the one the counting press just started
+  if(!debugMode && playingFireworkEffect < 0) {
+    struct tm t;
+    bool met = getLocalTime(&t, 0) && dayCounted(t);
+    ringFlashing = true;
+    ringFlashStart = millis();
+    ringFlashColor = met ? fireworkStrip.Color(0, 255, 0) : fireworkStrip.Color(255, 0, 0);
   }
 
   // the display timer starts once the count has scrolled in; presses while it shows restart it
@@ -313,6 +386,7 @@ void drawPushCount(int scrollRows) {
 
 void enterSettingMode() {
   settingMode = true;
+  stopFireworkEffect();
   savedActiveHour = activeHour;
   lastSettingInteraction = millis();
   lastSettingTap = millis() - setting_flash_ms;
@@ -362,17 +436,85 @@ void settingLoop() {
   numStrip.show();
 }
 
+// the release that ends a long press only finishes the toggle
+void onDebugRelease() {
+  if(longPressHandled) {
+    longPressHandled = false;
+    return;
+  }
+
+  if(fireworksMode) {
+    playNextFireworkEffect();
+  }
+  else {
+    showPushCount();
+  }
+}
+
+void toggleFireworksMode() {
+  fireworksMode = !fireworksMode;
+
+  // drop any count showing so it does not resume mid-scroll after fireworks mode
+  showClockTime = 0;
+  scrollFrom = 0;
+  scrollTo = 0;
+
+  stopFireworkEffect();
+}
+
+void playNextFireworkEffect() {
+  startFireworkEffect(nextFireworkEffect);
+  nextFireworkEffect = (nextFireworkEffect + 1) % firework_effect_count;
+}
+
+void startFireworkEffect(int effect) {
+  playingFireworkEffect = effect;
+  fireworkEffectStart = millis();
+  fireworkEffectSeed = random(1L << 30);
+}
+
+// leaves the rings dark, and has the outer ring redrawn on its next update
+void stopFireworkEffect() {
+  playingFireworkEffect = -1;
+  fireworkStrip.clear();
+  fireworkStrip.show();
+  shownRingColor = ring_color_unknown;
+}
+
+// plays the current effect once, then stops it
+void drawFireworkEffect() {
+  if(playingFireworkEffect < 0) return;
+
+  unsigned long elapsed = millis() - fireworkEffectStart;
+  if(elapsed >= celebration_ms) {
+    stopFireworkEffect();
+    return;
+  }
+  fireworkEffects[playingFireworkEffect](fireworkStrip, elapsed, fireworkEffectSeed);
+  fireworkStrip.show();
+}
+
 // debug mode treats every minute as inside the active window, with "0D:BG" in place of the time
 void debugLoop() {
+  if(lastStable == HIGH && !longPressHandled && millis() - pressStart >= long_press_ms) {
+    longPressHandled = true;
+    toggleFireworksMode();
+  }
+
   scrollToward(millis() < showClockTime ? count_scroll_rows : 0);
   int scrollRows = lroundf(scrollOffset());
 
   // redraw everything each frame so the pixel the snake leaves is restored
   numStrip.clear();
 
-  float pulse = activePulse();
-  setDisplayAsDebugClock(numStrip, numStrip.Color(clock_digit_level * pulse, 0, 0), numStrip.Color(clock_colon_level * pulse, 0, 0), scrollRows);
-  drawPushCount(scrollRows);
+  if(fireworksMode) {
+    drawFireworkEffect();
+  }
+  else {
+    float pulse = activePulse();
+    setDisplayAsDebugClock(numStrip, numStrip.Color(clock_digit_level * pulse, 0, 0), numStrip.Color(clock_colon_level * pulse, 0, 0), scrollRows);
+    drawPushCount(scrollRows);
+  }
 
   // the snake steps 15 times a second through the whole strip
   int snakePos = (millis() / (1000 / 15)) % total_lights;
@@ -393,20 +535,14 @@ void setLights() {
   numStrip.show();
 }
 
-void setFireworkPixel(int virtualIndex, uint32_t color) {
-  if(virtualIndex < 0 || virtualIndex >= total_firework_lights) return;
-  fireworkStrip.setPixelColor(getPhysicalFireworkPixelForVirtualIndex(virtualIndex), color);
-}
-
 // only sends to the strip when the color changes, so a dark ring costs nothing per loop
 void setOuterRing(uint32_t color) {
-  static uint32_t shownColor = 0;
-  if(color == shownColor) return;
-  shownColor = color;
+  if(color == shownRingColor) return;
+  shownRingColor = color;
 
   const auto& ring = fireworksRingInfo[3];
   for(int i = ring.start; i < getFireworkRingEnd(ring); i++) {
-    setFireworkPixel(i, color);
+    setFireworkPixel(fireworkStrip, i, color);
   }
   fireworkStrip.show();
 }
@@ -474,9 +610,9 @@ void ledCircleCycle(void *param) {
 
     // the tail wraps from the start of the strip back around to the end
     for(int j = 0; j < 4; j++) {
-      setFireworkPixel((i - j + n) % n, colors[j]);
+      setFireworkPixel(fireworkStrip, (i - j + n) % n, colors[j]);
     }
-    setFireworkPixel((i - 4 + n) % n, 0);
+    setFireworkPixel(fireworkStrip, (i - 4 + n) % n, 0);
     fireworkStrip.show();
 
     i = (i+1) % n;
