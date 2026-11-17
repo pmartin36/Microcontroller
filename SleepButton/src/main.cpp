@@ -5,17 +5,13 @@
 #include "display_setters.hpp"
 #include "fireworks.hpp"
 
-/** EXAMPLE **/
 void onPress();
 void onRelease();
 void showPushCount();
 void enterSettingMode();
 void exitSettingMode();
 void settingLoop();
-void setLights();
 void handleButton(int button);
-void ledCircleCycle(void* param);
-void ledScanCycle(void* param);
 void debugLoop();
 void onDebugRelease();
 void toggleFireworksMode();
@@ -31,18 +27,20 @@ void scrollToward(float target);
 float scrollOffset();
 void drawPushCount(int scrollRows);
 void setOuterRing(uint32_t color);
+unsigned long countHoldLeft();
 
 Adafruit_NeoPixel numStrip(total_lights, LIGHT_PIN, NEO_GRB + NEO_KHZ800);
 Adafruit_NeoPixel fireworkStrip(total_firework_lights, FIREWORK_PIN, NEO_GRB + NEO_KHZ800);
 
 bool lastStable = LOW;
 bool lastReading = LOW;
-unsigned int lastPin = 0;
 unsigned long lastChange = 0;
 
 bool clockEnabled = false;
 unsigned long lastSyncAttempt = 0;
-unsigned long showClockTime = 0;
+// the count shows for countHoldMs from countHoldStart, then scrolls back to the clock
+unsigned long countHoldStart = 0;
+unsigned long countHoldMs = 0;
 int pushCount = 0;
 int shownCount = 0;
 unsigned long pressStart = 0;
@@ -69,9 +67,9 @@ unsigned long lastSettingTap = 0;
 
 bool debugMode = false;
 
-// the counting press plays a random firework effect; debug fireworks mode, which debug starts in and a long
-// press toggles, shows only the snake on the matrix and plays the next effect on each press
-bool fireworksMode = true;
+// the counting press plays a random firework effect; debug fireworks mode, which a long press toggles, shows
+// only the snake on the matrix and plays the next effect on each press
+bool fireworksMode = false;
 bool longPressHandled = false;
 int nextFireworkEffect = 0;
 int playingFireworkEffect = -1;
@@ -87,9 +85,6 @@ uint32_t ringFlashColor = 0;
 constexpr uint32_t ring_color_unknown = 0xFFFFFFFF;
 uint32_t shownRingColor = 0;
 
-// firework debug task
-TaskHandle_t ledTask;
-
 bool buttonSettled(int button) {
   return digitalRead(button) == lastStable
       && millis() - lastChange > DEBOUNCE_MS;
@@ -98,13 +93,11 @@ bool buttonSettled(int button) {
 void setup() {
   Serial.begin(115200);
   
-  pinMode(2, OUTPUT);
+  pinMode(ONBOARD_LED_PIN, OUTPUT);
   pinMode(LIGHT_PIN, OUTPUT);
   pinMode(FIREWORK_PIN, OUTPUT);
-  pinMode(27, INPUT_PULLDOWN);
+  pinMode(INPUT_BUTTON_PIN, INPUT_PULLDOWN);
   pinMode(DEBUG_PIN, INPUT_PULLUP);
-  Serial.print("debug pin: ");
-  Serial.println(digitalRead(DEBUG_PIN));
 
   debugMode = digitalRead(DEBUG_PIN) == LOW;
 
@@ -130,12 +123,6 @@ void setup() {
   fireworkStrip.clear();
 
   fireworkStrip.show();
-
-  if(debugMode) {
-    return;
-  }
-
-  setLights();
 }
 
 void loop() {
@@ -159,7 +146,7 @@ void loop() {
 
   syncClockIfDue();
 
-  scrollToward(millis() < showClockTime ? count_scroll_rows : 0);
+  scrollToward(countHoldLeft() > 0 ? count_scroll_rows : 0);
   int scrollRows = lroundf(scrollOffset());
 
   numStrip.clear();
@@ -244,6 +231,12 @@ uint32_t flashedRingColor(uint32_t color) {
     blended[c] = from + (to - from) * flash;
   }
   return fireworkStrip.Color(blended[0], blended[1], blended[2]);
+}
+
+// how much longer the count shows; timing by elapsed time keeps it right when millis() wraps
+unsigned long countHoldLeft() {
+  unsigned long held = millis() - countHoldStart;
+  return held < countHoldMs ? countHoldMs - held : 0;
 }
 
 // starts a count_scroll_ms scroll from the current offset; a reversal mid-scroll starts from where it is
@@ -357,7 +350,8 @@ void showPushCount() {
 
   // the display timer starts once the count has scrolled in; presses while it shows restart it
   scrollToward(count_scroll_rows);
-  showClockTime = max(millis(), scrollStart + count_scroll_ms) + count_display_ms;
+  countHoldStart = millis();
+  countHoldMs = count_scroll_ms - min(count_scroll_ms, millis() - scrollStart) + count_display_ms;
 }
 
 // draws the push count above the clock at the current scroll
@@ -379,7 +373,7 @@ void drawPushCount(int scrollRows) {
   // the wave sloshes until the last wave_settle_ms before the count scrolls away, including when presses extend it
   unsigned long sinceReveal = millis() - (scrollStart + count_scroll_ms + count_reveal_delay_ms);
   if(scrollTo == count_scroll_rows) {
-    float envelope = min(1.f, (float)(showClockTime - millis()) / wave_settle_ms);
+    float envelope = min(1.f, (float)countHoldLeft() / wave_settle_ms);
     setDisplayAsWave(shownCount, numStrip, sinceReveal, envelope, clock_digit_level, countOffset);
   }
 }
@@ -394,7 +388,7 @@ void enterSettingMode() {
 
 void exitSettingMode() {
   settingMode = false;
-  showClockTime = 0;
+  countHoldMs = 0;
   scrollFrom = 0;
   scrollTo = 0;
   if(activeHour != savedActiveHour) {
@@ -455,7 +449,7 @@ void toggleFireworksMode() {
   fireworksMode = !fireworksMode;
 
   // drop any count showing so it does not resume mid-scroll after fireworks mode
-  showClockTime = 0;
+  countHoldMs = 0;
   scrollFrom = 0;
   scrollTo = 0;
 
@@ -501,7 +495,7 @@ void debugLoop() {
     toggleFireworksMode();
   }
 
-  scrollToward(millis() < showClockTime ? count_scroll_rows : 0);
+  scrollToward(countHoldLeft() > 0 ? count_scroll_rows : 0);
   int scrollRows = lroundf(scrollOffset());
 
   // redraw everything each frame so the pixel the snake leaves is restored
@@ -525,16 +519,6 @@ void debugLoop() {
   delay(20);
 }
 
-void setLights() {
-  for(int i = 0; i < total_lights; i += total_lights/3) {
-    int poff = (lastPin + i) % total_lights;
-    int pon = (poff + 1) % total_lights;
-    numStrip.setPixelColor(poff, 0);
-    numStrip.setPixelColor(pon, numStrip.Color(random(256), random(256), random(256)));
-  }
-  numStrip.show();
-}
-
 // only sends to the strip when the color changes, so a dark ring costs nothing per loop
 void setOuterRing(uint32_t color) {
   if(color == shownRingColor) return;
@@ -545,78 +529,4 @@ void setOuterRing(uint32_t color) {
     setFireworkPixel(fireworkStrip, i, color);
   }
   fireworkStrip.show();
-}
-
-void ledScanCycle(void *param) {
-  constexpr int n = total_firework_lights;
-  int angle = 0;
-
-  uint32_t c = fireworkStrip.Color(random(256), random(256), random(256));
-
-  fireworkStrip.setPixelColor(0, c);
-
-  uint16_t kNone = UINT16_MAX;
-  uint16_t lit[] = {kNone, kNone, kNone};
-
-  while(true) {
-    for(int i = 1; i < 4; i++) {
-      auto px = getFireworkPixelForAngle(i, angle);
-      if(px != lit[i-1]) {
-        fireworkStrip.setPixelColor(lit[i-1], 0);
-        lit[i-1] = px;
-        fireworkStrip.setPixelColor(lit[i-1], c);
-      }
-    }
-
-    angle += 360 / 24;
-    if(angle >= 360) {
-      angle -= 360;
-      c = fireworkStrip.Color(random(256), random(256), random(256));
-    }
-    fireworkStrip.show();
-    vTaskDelay(pdMS_TO_TICKS(1000 / 24));
-  }
-}
-
-void ledCircleCycle(void *param) {
-  constexpr int n = total_firework_lights;
-  int i = 0;
-
-  long head_r = random(256);
-  long head_g = random(256);
-  long head_b = random(256);
-  uint32_t colors[4] = {fireworkStrip.Color(head_r, head_g, head_b), 0 ,0 ,0};
-  int colorPropped = 3;
-
-  while(true) {
-    if(colorPropped > 0) {
-      int i = 4-colorPropped;
-      float factor = .75f;
-      if(i == 2) factor = 0.32f;
-      else if(i == 3) factor = 0.075f;
-
-      colors[i] = fireworkStrip.Color(head_r * factor, head_g * factor, head_b * factor);
-      colorPropped--;
-    }
-    else {
-      if(i % 10 == 0) {
-        head_r = random(256);
-        head_g = random(256);
-        head_b = random(256);
-        colors[0] = fireworkStrip.Color(head_r, head_g, head_b);
-        colorPropped = 3;
-      }
-    }
-
-    // the tail wraps from the start of the strip back around to the end
-    for(int j = 0; j < 4; j++) {
-      setFireworkPixel(fireworkStrip, (i - j + n) % n, colors[j]);
-    }
-    setFireworkPixel(fireworkStrip, (i - 4 + n) % n, 0);
-    fireworkStrip.show();
-
-    i = (i+1) % n;
-    
-    vTaskDelay(pdMS_TO_TICKS(100));
-  }
 }

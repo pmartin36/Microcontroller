@@ -15,11 +15,6 @@ struct FireworksRing {
   uint8_t offset;
   bool isCCW;
 };
-enum Rounding {
-  Round,
-  Ceil,
-  Floor,
-};
 
 constexpr FireworksRing fireworksRingInfo[] = {
   {0,1,0, false},
@@ -110,15 +105,6 @@ void getTimeFromTimeStruct(struct tm* t, uint8_t* h, uint8_t* m) {
   *m = t->tm_min;
 }
 
-bool getDisplayTime(uint8_t* h, uint8_t* m) {
-  struct tm t;
-  bool hasTime = getLocalTime(&t);
-  if (!hasTime) return false;
-  
-  getTimeFromTimeStruct(&t, h, m);
-  return true;
-}
-
 // returns the strip index for an x/y position, or -1 when it is off the display
 int getPixelIndexXY(int x, int y) {
   if(x >= lights_per_row || x < 0) {
@@ -172,42 +158,6 @@ int getPhysicalFireworkPixelForVirtualIndex(int index) {
   }
 
   return ((i + currentRing.offset) % currentRing.length) + currentRing.start;
-}
-
-int getNthPixelFromIndexOnSameRing(int index, int n) {
-  const auto& ring = *getFireworkRing(index);
-  int i = index - ring.start;
-  if(i+n > ring.length) {
-    i = i % ring.length;
-  }
-  while(i+n < 0) {
-    i += ring.length;
-  }
-  i += ring.start;
-  return getPhysicalFireworkPixelForVirtualIndex(i);
-}
-
-int getNextFireworkPixel(int index) {
-  if(index == total_firework_lights-1) return 0;
-  return getPhysicalFireworkPixelForVirtualIndex(index+1);
-}
-
-int getFireworkPixelForAngle(int ringNum, int angle, Rounding r = Rounding::Round) {
-  int px = 0;
-  const auto ring = fireworksRingInfo[ringNum];
-  float pct = angle / 360.f;
-  float led = ring.length * pct;
-  if(r == Rounding::Round) {
-    px = round(led);
-  }
-  else if(r == Rounding::Floor) {
-    px = floor(led);
-  }
-  else if(r == Rounding::Ceil) {
-    px = ceil(led);
-  }
-
-  return getPhysicalFireworkPixelForVirtualIndex((px % ring.length) + ring.start);
 }
 
 #endif
