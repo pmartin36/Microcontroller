@@ -23,7 +23,9 @@ constexpr uint8_t clock_colon_level = 58;
 constexpr int default_active_hour = 23;
 constexpr int active_duration_minutes = 60;
 
+// the count shows for count_display_ms in the active window and count_display_outside_ms outside it
 constexpr unsigned long count_display_ms = 4000;
+constexpr unsigned long count_display_outside_ms = count_display_ms / 2;
 constexpr unsigned long count_scroll_ms = 250;
 constexpr unsigned long count_reveal_delay_ms = 100;
 // the wave beside the count sloshes between the count and the screen edge, a column every

@@ -23,6 +23,7 @@ bool dayCounted(const struct tm& t);
 uint32_t flashedRingColor(uint32_t color);
 void syncClockIfDue();
 float activePulse();
+float ringBreath();
 void scrollToward(float target);
 float scrollOffset();
 void drawPushCount(int scrollRows);
@@ -68,7 +69,7 @@ unsigned long lastSettingTap = 0;
 bool debugMode = false;
 
 // the counting press plays a random firework effect; debug fireworks mode, which a long press toggles, shows
-// only the snake on the matrix and plays the next effect on each press
+// only the snake on the matrix, breathes the outer ring between effects, and plays the next effect on each press
 bool fireworksMode = false;
 bool longPressHandled = false;
 int nextFireworkEffect = 0;
@@ -158,7 +159,8 @@ void loop() {
   struct tm t;
   if(clockEnabled && getLocalTime(&t)) {
     if(isActiveTime(t, activeHour)) {
-      // the clock and outer ring pulse through the window: red until the day's press, green after
+      // the clock pulses through the window, red until the day's press and green after; until the press,
+      // the outer ring breathes red along with it
       float pulse = activePulse();
       if(dayCounted(t)) {
         digitColor = numStrip.Color(0, clock_digit_level * pulse, 0);
@@ -167,8 +169,8 @@ void loop() {
       else {
         digitColor = numStrip.Color(clock_digit_level * pulse, 0, 0);
         colonColor = numStrip.Color(clock_colon_level * pulse, 0, 0);
+        ringColor = fireworkStrip.Color(clock_digit_level * ringBreath(), 0, 0);
       }
-      ringColor = digitColor;
     }
     else if(dayCounted(t)) {
       // green from the day's press until midnight, blue otherwise
@@ -188,7 +190,7 @@ void loop() {
     drawFireworkEffect();
   }
   else {
-    // the outer firework ring pulses along with the clock and is dark otherwise
+    // the outer firework ring breathes red in the window until the day's press and is dark otherwise
     setOuterRing(flashedRingColor(ringColor));
   }
 
@@ -258,6 +260,13 @@ float scrollOffset() {
 // brightness factor that breathes between 0.7 and 1.0 every 3 seconds
 float activePulse() {
   return 0.85f + 0.15f * sinf(2 * PI * (millis() % 3000) / 3000.f);
+}
+
+// the outer ring's brightness factor: in step with activePulse, but from dark to full, squared so it rests
+// dim and swells briefly to the peak
+float ringBreath() {
+  float swell = 0.5f + 0.5f * sinf(2 * PI * (millis() % 3000) / 3000.f);
+  return swell * swell;
 }
 
 void handleButton(int button) {
@@ -348,10 +357,14 @@ void showPushCount() {
     ringFlashColor = met ? fireworkStrip.Color(0, 255, 0) : fireworkStrip.Color(255, 0, 0);
   }
 
-  // the display timer starts once the count has scrolled in; presses while it shows restart it
+  // the display timer starts once the count has scrolled in; presses while it shows restart it; debug treats
+  // every press as inside the window
+  struct tm now;
+  bool inWindow = debugMode || (getLocalTime(&now, 0) && isActiveTime(now, activeHour));
   scrollToward(count_scroll_rows);
   countHoldStart = millis();
-  countHoldMs = count_scroll_ms - min(count_scroll_ms, millis() - scrollStart) + count_display_ms;
+  countHoldMs = count_scroll_ms - min(count_scroll_ms, millis() - scrollStart)
+      + (inWindow ? count_display_ms : count_display_outside_ms);
 }
 
 // draws the push count above the clock at the current scroll
@@ -501,8 +514,12 @@ void debugLoop() {
   // redraw everything each frame so the pixel the snake leaves is restored
   numStrip.clear();
 
-  if(fireworksMode) {
+  if(fireworksMode && playingFireworkEffect >= 0) {
     drawFireworkEffect();
+  }
+  else if(fireworksMode) {
+    // between effects the outer ring breathes red, as it does in the window before the day's press
+    setOuterRing(fireworkStrip.Color(clock_digit_level * ringBreath(), 0, 0));
   }
   else {
     float pulse = activePulse();
